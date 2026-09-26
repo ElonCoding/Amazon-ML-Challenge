@@ -21,3 +21,16 @@ def compute_entity_f_beta(
     if denominator == 0:
         return 0.0
     return ((1 + beta_sq) * precision * recall) / denominator
+
+def compute_macro_f05(
+    ground_truth_map: Dict[str, List[str]],
+    prediction_map: Dict[str, List[str]],
+) -> Tuple[float, Dict[str, float]]:
+    scores = {}
+    for s1_id, true_list in ground_truth_map.items():
+        true_set = set(true_list)
+        pred_set = set(prediction_map.get(s1_id, []))
+        scores[s1_id] = compute_entity_f_beta(true_set, pred_set, beta=0.5)
+    if not scores:
+        return 0.0, {}
+    return sum(scores.values()) / len(scores), scores
