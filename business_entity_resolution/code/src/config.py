@@ -41,3 +41,11 @@ LIGHTGBM_PARAMS = {
 N_ESTIMATORS = 200
 EARLY_STOPPING_ROUNDS = 25
 VAL_SPLIT_RATIO = 0.20
+
+# Default File Paths
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+CHALLENGE_DATA_DIR = os.path.join(BASE_DIR, "dataset", "student_resource", "dataset")
+DEFAULT_TRAIN_DIR = os.path.join(CHALLENGE_DATA_DIR, "train")
+DEFAULT_TEST_DIR = os.path.join(CHALLENGE_DATA_DIR, "test")
+DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "output")
+DEFAULT_MODEL_PATH = os.path.join(BASE_DIR, "models", "lgb_model.joblib")
