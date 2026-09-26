@@ -40,3 +40,27 @@ def normalize_business_name(name: Optional[str]) -> str:
         s = re.sub(pattern, replacement, s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+ADDRESS_ABBREV_MAP = {
+    r"\brd\.?\b": "road",
+    r"\bst\.?\b": "street",
+    r"\bave\.?\b": "avenue",
+    r"\bblvd\.?\b": "boulevard",
+    r"\bln\.?\b": "lane",
+    r"\bfl\.?\b": "floor",
+    r"\bste\.?\b": "suite",
+    r"\bbldg\.?\b": "building",
+    r"\bmarg\b": "road",
+    r"\bopp\.?\b": "opposite",
+    r"\bnr\.?\b": "near",
+    r"\bsec\.?\b": "sector",
+    r"\bpl\.?\b": "place",
+    r"\bpkwy\.?\b": "parkway",
+}
+
+def normalize_address(address: Optional[str]) -> str:
+    s = clean_text_basic(address)
+    for pattern, replacement in ADDRESS_ABBREV_MAP.items():
+        s = re.sub(pattern, replacement, s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
