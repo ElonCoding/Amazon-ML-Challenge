@@ -31,3 +31,39 @@ def parse_ground_truth(gt_path: str) -> Dict[str, List[str]]:
                 if matched else []
             )
     return gt_map
+
+class EntityResolutionClassifier:
+    def __init__(self, params: Dict = None, n_estimators: int = N_ESTIMATORS):
+        self.params = params or LIGHTGBM_PARAMS
+        self.n_estimators = n_estimators
+        self.booster: Optional[lgb.Booster] = None
+        self.is_fitted = False
+        self.feature_names = FEATURE_NAMES
+        self.optimal_threshold = DEFAULT_THRESHOLD
+
+    def fit(self, X_train: pd.DataFrame, y_train: np.ndarray, X_val: pd.DataFrame = None, y_val: np.ndarray = None):
+        X_tr = X_train[self.feature_names].to_numpy(dtype=np.float32, copy=False)
+        y_tr = y_train.astype(np.float32)
+        dtrain = lgb.Dataset(X_tr, label=y_tr, feature_name=self.feature_names)
+        valid_sets = [dtrain]
+        valid_names = ["train"]
+        if X_val is not None and y_val is not None and len(y_val) > 0:
+            X_v = X_val[self.feature_names].to_numpy(dtype=np.float32, copy=False)
+            y_v = y_val.astype(np.float32)
+            dval = lgb.Dataset(X_v, label=y_v, reference=dtrain, feature_name=self.feature_names)
+            valid_sets.append(dval)
+            valid_names.append("valid")
+        self.booster = lgb.train(
+            self.params, dtrain, num_boost_round=self.n_estimators,
+            valid_sets=valid_sets, valid_names=valid_names,
+            callbacks=[lgb.early_stopping(stopping_rounds=25, verbose=False)],
+        )
+        self.is_fitted = True
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        if not self.is_fitted or self.booster is None:
+            raise RuntimeError("Model is not fitted.")
+        if X.empty:
+            return np.array([], dtype=np.float32)
+        return self.booster.predict(X[self.feature_names].values.astype(np.float32))
