@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / ambient files
+__pycache__/
+*.py[cod]
+*$py.class
+*.ipynb_checkpoints/
+
+# Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Competition Data (Do NOT push raw competition datasets)
+dataset/train/*.tsv
+dataset/test/*.tsv
+dataset/student_resource/
+dataset/*/*.tsv
+dataset/**/*.tsv
+*.tsv
+!dataset/**/.gitkeep
+
+# Large Generated Artifacts & Embeddings
+output/*.tsv
+*.zip
+*.tar.gz
+*.pkl
+*.joblib
+*.parquet
+
+# Model checkpoints / weights
+models/*.pt
+models/*.onnx
+models/*.bin
+models/*.txt
+models/*.joblib
+models/*
+!models/.gitkeep
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Security & Private Files
+*.env
+*.env.*
+*.pem
+*.key
+*.cert
+credentials.json
+token.json
+
+# Local working drafts & temporary scripts
+test_env.py
+package_submission.bat
+package_submission.sh
+architecture_workflow_document.md
+output_file_documentation.md
+problem_statement.md
+product_requirement_document.md
+software_requirements_specification.md
+technical_requirement_document.md
+utils/generate_benchmark_data.py
+__MACOSX/
+dataset/__MACOSX/
