@@ -63,3 +63,37 @@ class InvertedIndexEngine:
                 posting[1].append(w)
             norms[doc_id] = math.sqrt(sq_sum) if sq_sum > 0 else 1.0
         self.doc_norms = norms
+
+    def query_top_k(
+        self, query_text: str, top_k: int = 15, min_score: float = 0.12
+    ) -> List[Tuple[int, float]]:
+        if self.num_docs == 0:
+            return []
+        tokens = self.token_fn(query_text)
+        if not tokens:
+            return []
+        q_counts = Counter(tokens)
+        q_weights = {}
+        q_sq_sum = 0.0
+        for t, count in q_counts.items():
+            if t in self.idf:
+                w = (1.0 + math.log(count)) * self.idf[t]
+                q_weights[t] = w
+                q_sq_sum += w * w
+        if q_sq_sum == 0.0:
+            return []
+        q_norm = math.sqrt(q_sq_sum)
+        scores = defaultdict(float)
+        for t, qw in q_weights.items():
+            doc_ids, doc_weights = self.postings[t]
+            for pos in range(len(doc_ids)):
+                scores[doc_ids[pos]] += qw * doc_weights[pos]
+        results = []
+        for doc_id, dot in scores.items():
+            sim = dot / (q_norm * self.doc_norms[doc_id])
+            if sim >= min_score:
+                results.append((doc_id, sim))
+        if not results:
+            return []
+        results.sort(key=lambda x: (-x[1], x[0]))
+        return results[:top_k]
