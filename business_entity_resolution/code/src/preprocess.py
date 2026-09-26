@@ -1,22 +1,15 @@
 """
 Preprocessing and Text Canonicalization Engine.
+Adheres to:
+- REQ-IN-1: Strict TSV parsing with sep="\t".
+- REQ-IN-2: Open geography handling (supports US, India, France, and arbitrary strings).
+- REQ-IN-3: Text normalization (legal suffixes, address abbreviations, punctuation).
 """
+
 import re
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 
-def clean_text_basic(text: Optional[str]) -> str:
-    if text is None or pd.isna(text):
-        return ""
-    s = str(text).lower()
-    s = s.replace("&", " and ")
-    s = s.replace("/", " ")
-    s = s.replace("-", " ")
-    s = s.replace(".", " ")
-    s = s.replace(",", " ")
-    s = re.sub(r"[^\w\s]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
 
 LEGAL_SUFFIX_MAP = {
     r"\bcorp\.?\b": "corporation",
@@ -33,13 +26,6 @@ LEGAL_SUFFIX_MAP = {
     r"\bpvt\s+ltd\.?\b": "private limited",
     r"\bprivate\s+limited\b": "private limited",
 }
-
-def normalize_business_name(name: Optional[str]) -> str:
-    s = clean_text_basic(name)
-    for pattern, replacement in LEGAL_SUFFIX_MAP.items():
-        s = re.sub(pattern, replacement, s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
 
 ADDRESS_ABBREV_MAP = {
     r"\brd\.?\b": "road",
@@ -58,20 +44,64 @@ ADDRESS_ABBREV_MAP = {
     r"\bpkwy\.?\b": "parkway",
 }
 
+
+def clean_text_basic(text: Optional[str]) -> str:
+    """
+    Base string cleaning:
+    - Null safe
+    - Lowercase
+    - Replace '&' with 'and'
+    - Normalize punctuation and whitespace
+    """
+    if text is None or pd.isna(text):
+        return ""
+    s = str(text).lower()
+    s = s.replace("&", " and ")
+    s = s.replace("/", " ")
+    s = s.replace("-", " ")
+    s = s.replace(".", " ")
+    s = s.replace(",", " ")
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def normalize_business_name(name: Optional[str]) -> str:
+    """
+    Normalizes business name by expanding/stripping legal suffixes.
+    """
+    s = clean_text_basic(name)
+    for pattern, replacement in LEGAL_SUFFIX_MAP.items():
+        s = re.sub(pattern, replacement, s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def normalize_address(address: Optional[str]) -> str:
+    """
+    Normalizes business address components and abbreviations.
+    """
     s = clean_text_basic(address)
     for pattern, replacement in ADDRESS_ABBREV_MAP.items():
         s = re.sub(pattern, replacement, s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 def extract_address_digits(address: Optional[str]) -> List[str]:
+    """
+    Extracts numerical sequences (PIN codes, ZIP codes, plot/door numbers).
+    """
     if address is None or pd.isna(address):
         return []
     s = str(address)
-    return re.findall(r"\b\d{2,8}\b", s)
+    # Match sequences of 2 or more digits
+    digits = re.findall(r"\b\d{2,8}\b", s)
+    return digits
+
 
 def _apply_in_chunks(series: pd.Series, function, chunk_size: int = 100_000, arrow_strings: bool = False):
+    """Apply a text transform in bounded chunks to limit temporary Python objects."""
     chunks = []
     for start in range(0, len(series), chunk_size):
         values = series.iloc[start : start + chunk_size].apply(function)
@@ -82,3 +112,42 @@ def _apply_in_chunks(series: pd.Series, function, chunk_size: int = 100_000, arr
         dtype = "string[pyarrow]" if arrow_strings else object
         return pd.Series([], dtype=dtype)
     return pd.concat(chunks, ignore_index=True)
+
+
+def load_and_preprocess_tsv(file_path: str) -> pd.DataFrame:
+    """
+    Loads TSV file with strict sep="\t", performs schema checks and adds cleaned columns.
+    """
+    # Arrow-backed input strings use substantially less memory than Python
+    # object strings for the multi-million-row challenge tables.
+    df = pd.read_csv(
+        file_path,
+        sep="\t",
+        keep_default_na=False,
+        dtype_backend="pyarrow",
+    )
+
+    required_cols = ["entity_id", "business_name", "business_address", "country"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Required column '{col}' missing from {file_path}")
+
+    # Canonicalize text columns
+    df["clean_name"] = _apply_in_chunks(
+        df["business_name"], normalize_business_name, arrow_strings=True
+    )
+    df["clean_address"] = _apply_in_chunks(
+        df["business_address"], normalize_address, arrow_strings=True
+    )
+    # Open-set country normalization (just strip & lowercase, do NOT filter or map to fixed set)
+    df["clean_country"] = (
+        df["country"].fillna("").astype(str).str.strip().str.lower().astype("category")
+    )
+    df["digits"] = _apply_in_chunks(df["business_address"], extract_address_digits)
+
+    # Downstream retrieval and scoring use only these canonical fields and the
+    # ID. Drop the duplicate raw text columns after canonicalization to keep
+    # the resident tables smaller.
+    df.drop(columns=["business_name", "business_address", "country"], inplace=True)
+
+    return df
