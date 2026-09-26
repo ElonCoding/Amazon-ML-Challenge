@@ -22,3 +22,22 @@ DEFAULT_THRESHOLD = 0.70
 THRESHOLD_GRID_START = 0.40
 THRESHOLD_GRID_STOP = 0.90
 THRESHOLD_GRID_STEP = 0.02
+
+# Training Hyperparameters
+LIGHTGBM_PARAMS = {
+    "objective": "binary",
+    "metric": "binary_logloss",
+    "boosting_type": "gbdt",
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "max_depth": 6,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "random_state": RANDOM_SEED,
+    "verbosity": -1,
+    "num_threads": 1,
+    "force_row_wise": True,
+}
+N_ESTIMATORS = 200
+EARLY_STOPPING_ROUNDS = 25
+VAL_SPLIT_RATIO = 0.20
