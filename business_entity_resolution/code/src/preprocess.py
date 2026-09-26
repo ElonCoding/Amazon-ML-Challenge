@@ -64,3 +64,21 @@ def normalize_address(address: Optional[str]) -> str:
         s = re.sub(pattern, replacement, s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
+
+def extract_address_digits(address: Optional[str]) -> List[str]:
+    if address is None or pd.isna(address):
+        return []
+    s = str(address)
+    return re.findall(r"\b\d{2,8}\b", s)
+
+def _apply_in_chunks(series: pd.Series, function, chunk_size: int = 100_000, arrow_strings: bool = False):
+    chunks = []
+    for start in range(0, len(series), chunk_size):
+        values = series.iloc[start : start + chunk_size].apply(function)
+        if arrow_strings:
+            values = values.astype("string[pyarrow]")
+        chunks.append(values)
+    if not chunks:
+        dtype = "string[pyarrow]" if arrow_strings else object
+        return pd.Series([], dtype=dtype)
+    return pd.concat(chunks, ignore_index=True)
