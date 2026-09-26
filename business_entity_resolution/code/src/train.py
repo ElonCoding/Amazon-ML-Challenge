@@ -67,3 +67,47 @@ class EntityResolutionClassifier:
         if X.empty:
             return np.array([], dtype=np.float32)
         return self.booster.predict(X[self.feature_names].values.astype(np.float32))
+
+    def optimize_threshold(
+        self, X_val: pd.DataFrame, val_pairs: List[Tuple[str, str]], val_ground_truth: Dict[str, List[str]]
+    ) -> Tuple[float, float]:
+        probs = self.predict_proba(X_val)
+        pair_prob_map = {pair: float(prob) for pair, prob in zip(val_pairs, probs)}
+        s1_to_targets = {}
+        for (s1_id, t_id), p in pair_prob_map.items():
+            s1_to_targets.setdefault(s1_id, []).append((t_id, p))
+        best_tau = DEFAULT_THRESHOLD
+        best_f05 = -1.0
+        test_taus = np.arange(THRESHOLD_GRID_START, THRESHOLD_GRID_STOP + 1e-5, THRESHOLD_GRID_STEP)
+        for tau in test_taus:
+            pred_map = {s1_id: [] for s1_id in val_ground_truth}
+            for s1_id, targets in s1_to_targets.items():
+                if s1_id in pred_map:
+                    pred_map[s1_id] = [t_id for t_id, prob in targets if prob >= tau]
+            score, _ = compute_macro_f05(val_ground_truth, pred_map)
+            if score > best_f05:
+                best_f05 = score
+                best_tau = float(tau)
+        self.optimal_threshold = best_tau
+        return best_tau, best_f05
+
+    def save(self, filepath: str):
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "wb") as f:
+            pickle.dump({
+                "booster": self.booster, "is_fitted": self.is_fitted,
+                "optimal_threshold": self.optimal_threshold,
+                "feature_names": self.feature_names, "params": self.params,
+            }, f)
+
+    @classmethod
+    def load(cls, filepath: str) -> "EntityResolutionClassifier":
+        with open(filepath, "rb") as f:
+            data = pickle.load(f)
+        instance = cls()
+        instance.booster = data["booster"]
+        instance.is_fitted = data["is_fitted"]
+        instance.optimal_threshold = data.get("optimal_threshold", DEFAULT_THRESHOLD)
+        instance.feature_names = data.get("feature_names", FEATURE_NAMES)
+        instance.params = data.get("params", instance.params)
+        return instance
