@@ -88,6 +88,10 @@ def normalize_address(address: Optional[str]) -> str:
     return s
 
 
+import pyarrow as pa
+from typing import Dict, List, Optional, Tuple, Set
+
+
 def extract_address_digits(address: Optional[str]) -> List[str]:
     """
     Extracts numerical sequences (PIN codes, ZIP codes, plot/door numbers).
@@ -103,29 +107,63 @@ def extract_address_digits(address: Optional[str]) -> List[str]:
 def _apply_in_chunks(series: pd.Series, function, chunk_size: int = 100_000, arrow_strings: bool = False):
     """Apply a text transform in bounded chunks to limit temporary Python objects."""
     chunks = []
-    for start in range(0, len(series), chunk_size):
-        values = series.iloc[start : start + chunk_size].apply(function)
+    py_list = series.tolist()
+    for start in range(0, len(py_list), chunk_size):
+        sub = py_list[start : start + chunk_size]
+        res = [function(x) for x in sub]
         if arrow_strings:
-            values = values.astype("string[pyarrow]")
-        chunks.append(values)
+            res_series = pd.Series(pa.array(res, type=pa.string()), dtype="string[pyarrow]")
+        else:
+            res_series = pd.Series(res, dtype=object)
+        chunks.append(res_series)
+    del py_list
     if not chunks:
         dtype = "string[pyarrow]" if arrow_strings else object
         return pd.Series([], dtype=dtype)
     return pd.concat(chunks, ignore_index=True)
 
 
-def load_and_preprocess_tsv(file_path: str) -> pd.DataFrame:
+def load_and_preprocess_tsv(
+    file_path: str,
+    filter_ids: Optional[Set[str]] = None,
+    max_extra_rows: int = 0,
+) -> pd.DataFrame:
     """
     Loads TSV file with strict sep="\t", performs schema checks and adds cleaned columns.
+    When filter_ids is provided, streams the file in chunks to keep memory usage low.
     """
     # Arrow-backed input strings use substantially less memory than Python
     # object strings for the multi-million-row challenge tables.
-    df = pd.read_csv(
-        file_path,
-        sep="\t",
-        keep_default_na=False,
-        dtype_backend="pyarrow",
-    )
+    if filter_ids is not None:
+        chunks = []
+        extra_collected = 0
+        for chunk in pd.read_csv(
+            file_path,
+            sep="\t",
+            chunksize=100_000,
+            keep_default_na=False,
+            dtype_backend="pyarrow",
+        ):
+            in_filter = chunk["entity_id"].isin(filter_ids)
+            selected = chunk[in_filter]
+            if max_extra_rows > 0 and extra_collected < max_extra_rows:
+                needed = max_extra_rows - extra_collected
+                extra = chunk[~in_filter].head(needed)
+                extra_collected += len(extra)
+                selected = pd.concat([selected, extra], ignore_index=True)
+            if len(selected) > 0:
+                chunks.append(selected)
+        if chunks:
+            df = pd.concat(chunks, ignore_index=True)
+        else:
+            df = pd.read_csv(file_path, sep="\t", nrows=0, keep_default_na=False, dtype_backend="pyarrow")
+    else:
+        df = pd.read_csv(
+            file_path,
+            sep="\t",
+            keep_default_na=False,
+            dtype_backend="pyarrow",
+        )
 
     required_cols = ["entity_id", "business_name", "business_address", "country"]
     for col in required_cols:

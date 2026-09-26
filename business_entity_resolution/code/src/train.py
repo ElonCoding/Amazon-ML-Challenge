@@ -165,14 +165,27 @@ def train_model(train_dir: str, model_out: str, max_train_entities: Optional[int
     s3_path = os.path.join(train_dir, "train_source3.tsv")
     gt_path = os.path.join(train_dir, "train_ground_truth.tsv")
 
-    df_s1 = load_and_preprocess_tsv(s1_path)
-    df_s2 = load_and_preprocess_tsv(s2_path)
-    df_s3 = load_and_preprocess_tsv(s3_path)
+    print("Loading ground truth...")
     gt_map = parse_ground_truth(gt_path)
+
+    print("Loading Source 1...")
+    df_s1 = load_and_preprocess_tsv(s1_path)
 
     if max_train_entities and max_train_entities < len(df_s1):
         print(f"Sampling {max_train_entities} Source 1 entities with seed {RANDOM_SEED}.")
         df_s1 = df_s1.sample(n=max_train_entities, random_state=RANDOM_SEED).reset_index(drop=True)
+        sampled_s1_ids = set(df_s1["entity_id"])
+        target_ids = {t for s in sampled_s1_ids for t in gt_map.get(s, [])}
+        distractor_count = min(50_000, max_train_entities * 2)
+        print(f"Loading Source 2 with {len(target_ids)} gold targets and {distractor_count} distractors...")
+        df_s2 = load_and_preprocess_tsv(s2_path, filter_ids=target_ids, max_extra_rows=distractor_count)
+        print(f"Loading Source 3 with {len(target_ids)} gold targets and {distractor_count} distractors...")
+        df_s3 = load_and_preprocess_tsv(s3_path, filter_ids=target_ids, max_extra_rows=distractor_count)
+    else:
+        print("Loading Source 2...")
+        df_s2 = load_and_preprocess_tsv(s2_path)
+        print("Loading Source 3...")
+        df_s3 = load_and_preprocess_tsv(s3_path)
 
     np.random.seed(RANDOM_SEED)
     all_s1_ids = df_s1["entity_id"].values
