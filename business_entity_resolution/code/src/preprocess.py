@@ -8,6 +8,7 @@ Adheres to:
 
 import re
 import pandas as pd
+import numpy as np
 from typing import Dict, List, Optional, Tuple
 
 
@@ -123,10 +124,69 @@ def _apply_in_chunks(series: pd.Series, function, chunk_size: int = 100_000, arr
     return pd.concat(chunks, ignore_index=True)
 
 
+def _preprocess_frame(df: pd.DataFrame, file_path: str) -> pd.DataFrame:
+    """Validate the input schema and create the compact canonical columns."""
+    required_cols = ["entity_id", "business_name", "business_address", "country"]
+    for col in required_cols:
+        if col not in df.columns:
+            raise ValueError(f"Required column '{col}' missing from {file_path}")
+
+    df["clean_name"] = _apply_in_chunks(
+        df["business_name"], normalize_business_name, arrow_strings=False
+    )
+    df["clean_address"] = _apply_in_chunks(
+        df["business_address"], normalize_address, arrow_strings=False
+    )
+    df["clean_country"] = (
+        df["country"].fillna("").astype(str).str.strip().str.lower().astype("category")
+    )
+    df["digits"] = _apply_in_chunks(df["business_address"], extract_address_digits)
+    df.drop(columns=["business_name", "business_address", "country"], inplace=True)
+    return df
+
+
+def _stable_sample_key(entity_ids: pd.Series, seed: int) -> np.ndarray:
+    """Return stable per-ID hash keys for bounded, reproducible sampling."""
+    keys = pd.util.hash_pandas_object(entity_ids, index=False).to_numpy(dtype=np.uint64)
+    return keys ^ np.uint64(seed)
+
+
+def load_sampled_and_preprocess_tsv(
+    file_path: str,
+    sample_size: int,
+    seed: int = 42,
+    chunksize: int = 100_000,
+) -> pd.DataFrame:
+    """Read a deterministic entity sample without retaining the full input table."""
+    if sample_size <= 0:
+        raise ValueError("sample_size must be positive")
+
+    sampled = None
+    for chunk in pd.read_csv(
+        file_path,
+        sep="\t",
+        chunksize=chunksize,
+        keep_default_na=False,
+        dtype_backend="pyarrow",
+    ):
+        for col in ("entity_id", "business_name", "business_address", "country"):
+            if col not in chunk.columns:
+                raise ValueError(f"Required column '{col}' missing from {file_path}")
+        chunk["_sample_key"] = _stable_sample_key(chunk["entity_id"], seed)
+        candidates = chunk if sampled is None else pd.concat([sampled, chunk], ignore_index=True)
+        sampled = candidates.nsmallest(sample_size, "_sample_key").reset_index(drop=True)
+
+    if sampled is None:
+        raise ValueError(f"No rows found in {file_path}")
+    sampled.drop(columns=["_sample_key"], inplace=True)
+    return _preprocess_frame(sampled, file_path)
+
+
 def load_and_preprocess_tsv(
     file_path: str,
     filter_ids: Optional[Set[str]] = None,
     max_extra_rows: int = 0,
+    random_seed: int = 42,
 ) -> pd.DataFrame:
     """
     Loads TSV file with strict sep="\t", performs schema checks and adds cleaned columns.
@@ -135,8 +195,8 @@ def load_and_preprocess_tsv(
     # Arrow-backed input strings use substantially less memory than Python
     # object strings for the multi-million-row challenge tables.
     if filter_ids is not None:
-        chunks = []
-        extra_collected = 0
+        target_chunks = []
+        distractors = None
         for chunk in pd.read_csv(
             file_path,
             sep="\t",
@@ -144,17 +204,30 @@ def load_and_preprocess_tsv(
             keep_default_na=False,
             dtype_backend="pyarrow",
         ):
+            for col in ("entity_id", "business_name", "business_address", "country"):
+                if col not in chunk.columns:
+                    raise ValueError(f"Required column '{col}' missing from {file_path}")
             in_filter = chunk["entity_id"].isin(filter_ids)
-            selected = chunk[in_filter]
-            if max_extra_rows > 0 and extra_collected < max_extra_rows:
-                needed = max_extra_rows - extra_collected
-                extra = chunk[~in_filter].head(needed)
-                extra_collected += len(extra)
-                selected = pd.concat([selected, extra], ignore_index=True)
-            if len(selected) > 0:
-                chunks.append(selected)
-        if chunks:
-            df = pd.concat(chunks, ignore_index=True)
+            selected_targets = chunk[in_filter]
+            if not selected_targets.empty:
+                target_chunks.append(selected_targets)
+            if max_extra_rows > 0:
+                extra = chunk[~in_filter].copy()
+                if not extra.empty:
+                    extra["_sample_key"] = _stable_sample_key(extra["entity_id"], random_seed)
+                    candidates = extra if distractors is None else pd.concat(
+                        [distractors, extra], ignore_index=True
+                    )
+                    distractors = candidates.nsmallest(
+                        max_extra_rows, "_sample_key"
+                    ).reset_index(drop=True)
+
+        pieces = target_chunks
+        if distractors is not None:
+            distractors.drop(columns=["_sample_key"], inplace=True)
+            pieces.append(distractors)
+        if pieces:
+            df = pd.concat(pieces, ignore_index=True)
         else:
             df = pd.read_csv(file_path, sep="\t", nrows=0, keep_default_na=False, dtype_backend="pyarrow")
     else:
@@ -165,27 +238,4 @@ def load_and_preprocess_tsv(
             dtype_backend="pyarrow",
         )
 
-    required_cols = ["entity_id", "business_name", "business_address", "country"]
-    for col in required_cols:
-        if col not in df.columns:
-            raise ValueError(f"Required column '{col}' missing from {file_path}")
-
-    # Canonicalize text columns
-    df["clean_name"] = _apply_in_chunks(
-        df["business_name"], normalize_business_name, arrow_strings=False
-    )
-    df["clean_address"] = _apply_in_chunks(
-        df["business_address"], normalize_address, arrow_strings=False
-    )
-    # Open-set country normalization (just strip & lowercase, do NOT filter or map to fixed set)
-    df["clean_country"] = (
-        df["country"].fillna("").astype(str).str.strip().str.lower().astype("category")
-    )
-    df["digits"] = _apply_in_chunks(df["business_address"], extract_address_digits)
-
-    # Downstream retrieval and scoring use only these canonical fields and the
-    # ID. Drop the duplicate raw text columns after canonicalization to keep
-    # the resident tables smaller.
-    df.drop(columns=["business_name", "business_address", "country"], inplace=True)
-
-    return df
+    return _preprocess_frame(df, file_path)

@@ -4,7 +4,7 @@ This repository implements a local pipeline for matching Source 1 business recor
 
 ## Project status
 
-The repository contains the training, blocking, scoring, inference, validator, and packaging components. The challenge TSVs are in `dataset/student_resource/dataset/`. No trained model or final TSV outputs are checked in. Performance figures must be generated from a reproducible run before they are reported as results.
+The repository contains the training, blocking, scoring, inference, validator, and packaging components. The challenge TSVs are in `dataset/student_resource/dataset/`. Local fitted models and sampled-validation metrics are in `models/`; no final test TSV outputs have been generated. The sampled results are documented in `output/TRAINING_RUN_ANALYSIS.md` and must not be presented as full-corpus or leaderboard results.
 
 ## Data and outputs
 
@@ -25,7 +25,7 @@ Every output match must exist in the corresponding candidate list. The challenge
 4. `src/train.py` trains a LightGBM pair classifier and tunes a threshold on a Source 1 holdout for macro F₀.₅.
 5. `src/inference.py` generates and scores test candidates, then writes the two TSVs.
 
-The cap of 20 candidates per Source 1 is a project setting, not a numeric limit stated in the challenge brief. Evaluate it against held-out candidate recall and candidate-set size. The current blocker partitions by exact country labels; this processes unseen labels such as France but assumes matching records share the same label. Measure or revise that assumption before finalizing results.
+The current cap is 40 candidates per Source 1. A 5,000-anchor validation comparison measured candidate recall of 0.9980 at cap 40 versus 0.9288 at cap 20, while average candidates rose from 20.00 to 33.18. Macro F₀.₅ on that sampled validation split was 0.9847 at cap 40 and 0.9590 at cap 20. These are sampled results only; cap 40 is a project setting, not a numeric challenge limit. The blocker partitions by exact country labels; this processes unseen labels such as France but assumes matching records share the same label. Measure or revise that assumption before finalizing results.
 
 ## Environment
 
@@ -43,7 +43,19 @@ python business_entity_resolution\code\src\inference.py
 
 The default input paths now resolve to `dataset/student_resource/dataset/{train,test}`. Model and output paths default to `models/lgb_model.joblib` and `output/`.
 
-For a deterministic Source 1 sample during an initial code-path run, pass `--max-train-entities N` to training. This samples Source 1 records; it still loads the complete Source 2 and Source 3 corpora, so it does not solve target-index memory needs.
+For a deterministic bounded training/validation run, pass `--max-train-entities N`; Source 1 is sampled while streaming, and each target source is scanned while retaining the sampled anchors' gold targets plus up to `2*N` seeded distractors. The run writes a `.metrics.json` file beside the model with pair counts, candidate recall, calibrated metrics, and provenance. This is a sampled target corpus, not a full-corpus performance result.
+
+Example sampled run:
+
+```powershell
+python business_entity_resolution\code\src\train.py `
+  --train-dir dataset\student_resource\dataset\train `
+  --model-out models\validation_model.joblib `
+  --max-train-entities 5000 `
+  --max-candidates-per-entity 40
+```
+
+Full training and inference have not been completed on this machine. A 10,000-anchor confirmation run reached 96% system memory use and was stopped; benchmark memory on a larger-memory system before attempting full runs.
 
 ## Validation and package
 
@@ -61,6 +73,6 @@ The archive contains `output/`, `code/business_entity_resolution/{src,README.md,
 
 Optimize the exact macro-average F₀.₅ over Source 1 entities. Correctly predicting an empty list for a true singleton scores 1.0; predicting any match for it scores 0.0. The final model must meet the challenge's MIT/Apache 2.0 license and up-to-8-billion-parameter constraints. Do not use external lookups or external data augmentation.
 
-Do not publish candidate-recall, reduction-ratio, threshold, model-size, or F₀.₅ claims until they have been measured from the current code and documented with the validation split and run configuration.
+Do not publish sampled candidate-recall, reduction-ratio, threshold, or F₀.₅ as full-data or leaderboard results. Record the validation split and run configuration for any measured claim.
 
 
