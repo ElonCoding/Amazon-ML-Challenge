@@ -235,13 +235,16 @@ class MultiIndexBlocker:
                 if len(d) >= 4 and len(pin_index[d]) < 10:
                     pin_index[d].append(tidx)
 
+        s1_names = s1_sub["clean_name"].tolist()
+        s1_addrs = s1_sub["clean_address"].tolist()
+        s1_digits_list = s1_sub["digits"].tolist()
         result: Dict[str, List[str]] = {}
 
         for i in range(n_s1):
-            s1_id = s1_ids[i]
-            s1_name = s1_sub.at[i, "clean_name"]
-            s1_addr = s1_sub.at[i, "clean_address"]
-            s1_digits = s1_sub.at[i, "digits"]
+            s1_id = str(s1_ids[i])
+            s1_name = s1_names[i]
+            s1_addr = s1_addrs[i]
+            s1_digits = s1_digits_list[i]
 
             cand_scores: Dict[int, float] = defaultdict(float)
 

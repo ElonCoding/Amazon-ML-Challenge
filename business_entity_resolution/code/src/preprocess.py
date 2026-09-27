@@ -172,10 +172,10 @@ def load_and_preprocess_tsv(
 
     # Canonicalize text columns
     df["clean_name"] = _apply_in_chunks(
-        df["business_name"], normalize_business_name, arrow_strings=True
+        df["business_name"], normalize_business_name, arrow_strings=False
     )
     df["clean_address"] = _apply_in_chunks(
-        df["business_address"], normalize_address, arrow_strings=True
+        df["business_address"], normalize_address, arrow_strings=False
     )
     # Open-set country normalization (just strip & lowercase, do NOT filter or map to fixed set)
     df["clean_country"] = (

@@ -87,13 +87,10 @@ def run_inference(
     # 1. Blocking
     blocker = MultiIndexBlocker(max_candidates_per_entity=MAX_CANDIDATES_PER_ENTITY)
     candidate_map = blocker.generate_candidates(df_test_s1, df_test_s2, df_test_s3)
-    # Keep target frames separate; feature batches use the source prefix to
-    # look up only the corresponding source without concatenating two huge
-    # tables into an additional full-size copy.
     target_frames = (df_test_s2, df_test_s3)
-    target_indexes = tuple(
-        frame.set_index("entity_id", drop=False) for frame in target_frames
-    )
+    df_test_s2.set_index("entity_id", drop=False, inplace=True)
+    df_test_s3.set_index("entity_id", drop=False, inplace=True)
+    target_indexes = target_frames
 
     cand_path = os.path.join(output_dir, "candidate_pairs.tsv")
     serialize_candidate_pairs(candidate_map, s1_order, cand_path)
